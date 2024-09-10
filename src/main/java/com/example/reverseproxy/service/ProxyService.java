@@ -1,14 +1,13 @@
 package com.example.reverseproxy.service;
 
+import com.example.reverseproxy.entity.Context;
 import com.example.reverseproxy.entity.Log;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.ResponseEntity;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.*;
 import org.springframework.http.client.BufferingClientHttpRequestFactory;
 import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -18,10 +17,10 @@ import org.springframework.retry.annotation.Retryable;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestTemplate;
-import org.springframework.web.util.UriComponentsBuilder;
+import org.springframework.web.server.ResponseStatusException;
 
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.net.URI;
@@ -39,39 +38,45 @@ public class ProxyService {
     @Autowired
     private LogService logService;
 
-    private ContextService contextService;
+    @Autowired
+    private ContextService ctxService;
+
     private final static Logger logger = LogManager.getLogger(ProxyService.class);
-    @Retryable(exclude = {
-            HttpStatusCodeException.class}, include = Exception.class, backoff = @Backoff(delay = 5000, multiplier = 4.0), maxAttempts = 4)
+
     public ResponseEntity<String> processProxyRequest(HttpServletRequest request, HttpServletResponse response){
 
-//        ThreadContext.put("traceId", traceId);
-        //no service name = 404, otherwise forward
-        Log newLog = new Log();
-        newLog.setUrl(StringUtils.replaceOnce(request.getRequestURI(), request.getContextPath(), ""));
-        newLog.setStartTime(LocalDateTime.now());
+        Log log = new Log();
+        log.setUrl(StringUtils.replaceOnce(request.getRequestURI(), request.getContextPath(), ""));
+        log.setStartTime(LocalDateTime.now());
 
-        URI uri = this.uriBuilder(request);
-        HttpHeaders headers = this.getHeaders(request);
-        HttpEntity<String> httpEntity = new HttpEntity<>(this.getBody(request), headers);
-        ClientHttpRequestFactory factory = new BufferingClientHttpRequestFactory(new SimpleClientHttpRequestFactory());
-        RestTemplate restTemplate = new RestTemplate(factory);
         try {
+            HttpHeaders headers = this.getHeaders(request);
+//            headers.set("service","ekyc");
+            Context ctx=null;
+            if(headers.containsKey("service")){
+                String service= Objects.requireNonNull(headers.get("service")).get(0);
+                ctx =ctxService.getContextByServiceName(service);
+            }
+            if (ctx==null) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Hello WORLD >> 404 <<");
 
-            newLog.setContextObject(contextService.getContextByServiceName(headers.get("service").toString()));
-            ResponseEntity<String> serverResponse = restTemplate.exchange(uri, Objects.requireNonNull(HttpMethod.valueOf(request.getMethod())), httpEntity, String.class);
+            URI uri = this.uriBuilder(request, ctx);
 
+            HttpEntity<String> httpEntity = new HttpEntity<>(this.getBody(request), headers);
+            ClientHttpRequestFactory factory = new BufferingClientHttpRequestFactory(new SimpleClientHttpRequestFactory());
+            RestTemplate restTemplate = new RestTemplate(factory);
 
-            newLog.setEndTime(LocalDateTime.now());
-            newLog.setUrlBodySize(serverResponse.getBody().getBytes(StandardCharsets.UTF_8).length);
-
-            logService.createLog(newLog);
-            HttpHeaders responseHeaders = new HttpHeaders();
-//            responseHeaders.put(HttpHeaders.CONTENT_TYPE, Objects.requireNonNull(serverResponse.getHeaders().get(HttpHeaders.CONTENT_TYPE)));
-//            logger.info(serverResponse);
+            log.setCtx(ctx);
+            ResponseEntity<String> serverResponse = restTemplate.exchange(uri, Objects.requireNonNull(HttpMethod.resolve(request.getMethod())), httpEntity, String.class);
+            log.setEndTime(LocalDateTime.now());
+            log.setUrlBodySize(Objects.requireNonNull(serverResponse.getBody()).getBytes(StandardCharsets.UTF_8).length);
+            log.setHttpStatus(serverResponse.getStatusCode().value());
+            logService.createLog(log);
             return serverResponse;
         } catch (HttpStatusCodeException e) {
             logger.error(e.getMessage());
+            log.setHttpStatus(e.getStatusCode().value());
+            log.setResponseErrorMessage(e.getMessage());
+            logService.createLog(log);
             return ResponseEntity.status(e.getRawStatusCode())
                     .headers(e.getResponseHeaders())
                     .body(e.getResponseBodyAsString());
@@ -92,17 +97,23 @@ public class ProxyService {
         }
         return headers;
     }
-    URI uriBuilder(HttpServletRequest request){
+    URI uriBuilder(HttpServletRequest request, Context ctx){
         //log if required in this line
         URI uri = null;
         try {
-            uri = new URI(request.getScheme(), null, domain, 8504, null, null, null);
+            uri = new URI(ctx.getScheme(),
+                    request.getRemoteUser(),
+                    ctx.getHost(),
+                    ctx.getPort(),
+                    StringUtils.replaceOnce(request.getRequestURI(), request.getContextPath(), ""),
+                    request.getQueryString(),
+                    null);
             // replacing context path form urI to match actual gateway URI
-            uri = UriComponentsBuilder.fromUri(uri)
-                    .path(StringUtils.replaceOnce(request.getRequestURI(), request.getContextPath(), ""))
-                    .query(request.getQueryString())
-                    .build(true)
-                    .toUri();
+//            uri = UriComponentsBuilder.
+//                    .path()
+//                    .query()
+//                    .build(true)
+//                    .toUri();
         } catch (URISyntaxException e) {
             e.printStackTrace();
         }finally {

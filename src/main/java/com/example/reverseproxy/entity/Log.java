@@ -21,7 +21,7 @@ public class Log {
 
     @ManyToOne
     @JoinColumn(name = "context_object_id")
-    private Context contextObject;
+    private Context ctx;
 
     private String url;
 
@@ -30,5 +30,9 @@ public class Log {
     private LocalDateTime startTime;
 
     private LocalDateTime endTime;
+
+    private int httpStatus;
+
+    private String responseErrorMessage;
 
 }

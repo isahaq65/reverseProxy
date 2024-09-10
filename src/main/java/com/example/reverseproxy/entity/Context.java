@@ -1,13 +1,12 @@
 package com.example.reverseproxy.entity;
 
 
-import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
+
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+
+import javax.persistence.*;
 
 @Data
 @AllArgsConstructor
@@ -17,10 +16,17 @@ import lombok.NoArgsConstructor;
 public class Context {
 
     @Id
-    @GeneratedValue
+    @GeneratedValue(strategy = GenerationType.AUTO)
     private int id;
+
+    @Column(unique = true)
     private String serviceName;
-    private String url;
 
+    private String host;
 
+    private int port;
+
+    private String contextPath;
+
+    private String scheme;
 }

@@ -10,13 +10,17 @@ public class LogService {
 
     @Autowired
     private LogRepository logRepository;
-
+    @Autowired
+    private ContextService contextService;
     public Log createLog(Log logData) {
         Log log = new Log();
         log.setUrl(logData.getUrl());
         log.setUrlBodySize(logData.getUrlBodySize());
         log.setStartTime(logData.getStartTime());
         log.setEndTime(log.getEndTime());
-        log.setContextObject(new ContextService().getContextByServiceName(logData.getContextObject().getServiceName()));
-        return logRepository.save(log);     }
+        log.setCtx(this.contextService.getContextByServiceName(logData.getCtx().getServiceName()));
+        log.setHttpStatus(logData.getHttpStatus());
+        log.setResponseErrorMessage(logData.getResponseErrorMessage());
+        return logRepository.save(log);   
+    }
 }
